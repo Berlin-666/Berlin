@@ -1,0 +1,33 @@
+#include <stdio.h>  
+#include <stdbool.h>  
+
+#define ROWS 3  
+#define COLS 4  
+
+bool isToeplitzMatrix(int matrix[ROWS][COLS], int rows, int cols) {  
+    for (int i = 0; i < rows - 1; i++) {  
+        for (int j = 0; j < cols - 1; j++) {  
+            // 如果当前元素不等于右下角的元素，返回false  
+            if (matrix[i][j] != matrix[i + 1][j + 1]) {  
+                return false;  
+            }  
+        }  
+    }  
+    return true;  
+}  
+
+int main() {  
+    int matrix[ROWS][COLS] = {  
+        {1, 2, 3, 4},  
+        {5, 1, 2, 3},  
+        {6, 5, 1, 2}  
+    };  
+
+    if (isToeplitzMatrix(matrix, ROWS, COLS)) {  
+        printf("该矩阵是托普利茨矩阵。\n");  
+    } else {  
+        printf("该矩阵不是托普利茨矩阵。\n");  
+    }  
+
+    return 0;  
+}  
