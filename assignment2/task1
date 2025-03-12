@@ -1,1 +1,37 @@
+#include <stdio.h>  
 
+// 函数原型  
+void print_prime_factors(int number);  
+
+int main() {  
+    int number;  
+
+    // 提示用户输入一个正整数  
+    printf("请输入一个正整数：");  
+    scanf("%d", &number);  
+
+    // 检查输入是否有效  
+    if (number <= 1) {  
+        printf("请输入大于1的正整数。\n");  
+        return 1;  
+    }  
+
+    // 输出素数因子  
+    printf("%d 的所有素数因子为：", number);  
+    print_prime_factors(number);  
+    printf("\n");  
+
+    return 0;  
+}  
+
+// 打印所有素数因子  
+void print_prime_factors(int number) {  
+    // 从2开始检查每个整数是否是因子  
+    for (int i = 2; i <= number; i++) {  
+        // 只要i是number的因子，就持续除以它  
+        while (number % i == 0) {  
+            printf("%d ", i); // 打印素数因子  
+            number /= i; // 更新number  
+        }  
+    }  
+}  
