@@ -1,1 +1,138 @@
+#include <stdio.h>  
+#include <stdlib.h>  
+#include <time.h>  
 
+// 定义一个接口结构体  
+typedef struct Shape {  
+    double (*area)(void *self);  
+    int (*isValid)(void *self);  
+} Shape;  
+
+// 定义长方形结构体  
+typedef struct Rectangle {  
+    Shape shape; // 接口  
+    double width;  
+    double height;  
+} Rectangle;  
+
+// 定义正方形结构体  
+typedef struct Square {  
+    Shape shape; // 接口  
+    double side;  
+} Square;  
+
+// 定义三角形结构体  
+typedef struct Triangle {  
+    Shape shape; // 接口  
+    double base;  
+    double height;  
+} Triangle;  
+
+// 计算长方形面积  
+double rectangle_area(void *self) {  
+    Rectangle *rectangle = (Rectangle *)self;  
+    return rectangle->width * rectangle->height;  
+}  
+
+// 判断长方形是否合法  
+int rectangle_isValid(void *self) {  
+    Rectangle *rectangle = (Rectangle *)self;  
+    return rectangle->width > 0 && rectangle->height > 0;  
+}  
+
+// 计算正方形面积  
+double square_area(void *self) {  
+    Square *square = (Square *)self;  
+    return square->side * square->side;  
+}  
+
+// 判断正方形是否合法  
+int square_isValid(void *self) {  
+    Square *square = (Square *)self;  
+    return square->side > 0;  
+}  
+
+// 计算三角形面积  
+double triangle_area(void *self) {  
+    Triangle *triangle = (Triangle *)self;  
+    return 0.5 * triangle->base * triangle->height;  
+}  
+
+// 判断三角形是否合法  
+int triangle_isValid(void *self) {  
+    Triangle *triangle = (Triangle *)self;  
+    return triangle->base > 0 && triangle->height > 0;  
+}  
+
+// 创建长方形  
+Rectangle* create_rectangle(double width, double height) {  
+    Rectangle *rectangle = (Rectangle *)malloc(sizeof(Rectangle));  
+    rectangle->width = width;  
+    rectangle->height = height;  
+    rectangle->shape.area = rectangle_area;  
+    rectangle->shape.isValid = rectangle_isValid;  
+    return rectangle;  
+}  
+
+// 创建正方形  
+Square* create_square(double side) {  
+    Square *square = (Square *)malloc(sizeof(Square));  
+    square->side = side;  
+    square->shape.area = square_area;  
+    square->shape.isValid = square_isValid;  
+    return square;  
+}  
+
+// 创建三角形  
+Triangle* create_triangle(double base, double height) {  
+    Triangle *triangle = (Triangle *)malloc(sizeof(Triangle));  
+    triangle->base = base;  
+    triangle->height = height;  
+    triangle->shape.area = triangle_area;  
+    triangle->shape.isValid = triangle_isValid;  
+    return triangle;  
+}  
+
+// 工厂函数，根据type创建形状  
+void* shape_factory(int type) {  
+    double dimension1 = (rand() % 10) + 1; // 1到10之间的随机数  
+    double dimension2 = (rand() % 10) + 1; // 1到10之间的随机数  
+    
+    switch (type) {  
+        case 0: // 创建长方形  
+            return create_rectangle(dimension1, dimension2);  
+        case 1: // 创建正方形  
+            return create_square(dimension1);  
+        case 2: // 创建三角形  
+            return create_triangle(dimension1, dimension2);  
+        default:  
+            return NULL;  
+    }  
+}  
+
+// 主函数  
+int main() {  
+    srand(time(NULL)); // 设置随机种子  
+    Shape *shapes[10];  
+    double total_area = 0;  
+
+    // 随机创建10个形状对象  
+    for (int i = 0; i < 10; i++) {  
+        int shape_type = rand() % 3; // 随机选择形状类型  
+        shapes[i] = shape_factory(shape_type);  
+        if (shapes[i]->isValid(shapes[i])) {  
+            total_area += shapes[i]->area(shapes[i]);  
+        } else {  
+            printf("Created invalid shape, skipping area calculation.\n");  
+        }  
+    }  
+
+    printf("Total area of all valid shapes: %.2f\n", total_area);  
+
+    // 释放内存  
+    for (int i = 0; i < 10; i++) {  
+        free(shapes[i]);  
+    }  
+
+    return 0;  
+}  
