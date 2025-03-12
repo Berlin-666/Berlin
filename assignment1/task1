@@ -1,0 +1,44 @@
+#include <stdio.h>  
+
+int main() {  
+    double num1, num2; // 用于存储输入的两个数字  
+    char operator; // 用于存储运算符  
+    double result; // 用于存储计算结果  
+
+    // 提示用户输入两个数字和运算符  
+    printf("请输入第一个数字：");  
+    scanf("%lf", &num1);  
+    printf("请输入第二个数字：");  
+    scanf("%lf", &num2);  
+    printf("请输入运算符 (+, -, *, /)：");  
+    scanf(" %c", &operator); // 读取运算符，注意前面的空格用于清除缓冲区  
+
+    // 根据运算符进行相应的计算  
+    switch (operator) {  
+        case '+':  
+            result = num1 + num2;  
+            printf("%.2lf + %.2lf = %.2lf\n", num1, num2, result);  
+            break;  
+        case '-':  
+            result = num1 - num2;  
+            printf("%.2lf - %.2lf = %.2lf\n", num1, num2, result);  
+            break;  
+        case '*':  
+            result = num1 * num2;  
+            printf("%.2lf * %.2lf = %.2lf\n", num1, num2, result);  
+            break;  
+        case '/':  
+            if (num2 != 0) {  
+                result = num1 / num2;  
+                printf("%.2lf / %.2lf = %.2lf\n", num1, num2, result);  
+            } else {  
+                printf("错误：除数不能为零。\n");  
+            }  
+            break;  
+        default:  
+            printf("错误：无效的运算符。\n");  
+            break;  
+    }  
+
+    return 0;  
+}  
