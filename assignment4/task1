@@ -1,0 +1,109 @@
+#include <stdio.h>  
+#include <stdlib.h>  
+
+// 定义链表节点结构  
+typedef struct Node {  
+    void* data;  
+    struct Node* next;  
+} Node;  
+
+// 定义链表结构  
+typedef struct LinkedList {  
+    Node* head;  
+    size_t data_size;  
+} LinkedList;  
+
+// 创建链表  
+LinkedList* create_list(size_t data_size) {  
+    LinkedList* list = (LinkedList*)malloc(sizeof(LinkedList));  
+    list->head = NULL;  
+    list->data_size = data_size;  
+    return list;  
+}  
+
+// 添加元素到链表  
+void add(LinkedList* list, void* item) {  
+    Node* new_node = (Node*)malloc(sizeof(Node));  
+    new_node->data = malloc(list->data_size);  
+    memcpy(new_node->data, item, list->data_size);  
+    new_node->next = list->head;  
+    list->head = new_node;  
+}  
+
+// 遍历链表的 forEach 方法  
+void forEach(LinkedList* list, void (*action)(void*)) {  
+    Node* current = list->head;  
+    while (current != NULL) {  
+        action(current->data);  
+        current = current->next;  
+    }  
+}  
+
+// 打印整数  
+void print_int(void* data) {  
+    printf("%d\n", *(int*)data);  
+}  
+
+// 求最大值  
+void find_max(void* data) {  
+    static int max = 0;  // 假设链表中都是正数  
+    if (*(int*)data > max) {  
+        max = *(int*)data;  
+    }  
+}  
+
+// 求最小值  
+void find_min(void* data) {  
+    static int min = INT_MAX;  // 假设链表中都为正数  
+    if (*(int*)data < min) {  
+        min = *(int*)data;  
+    }  
+}  
+
+// 求和  
+void sum_values(void* data) {  
+    static int sum = 0;  
+    sum += *(int*)data;  
+}  
+
+// 清理链表  
+void free_list(LinkedList* list) {  
+    Node* current = list->head;  
+    Node* next;  
+    while (current != NULL) {  
+        next = current->next;  
+        free(current->data);  
+        free(current);  
+        current = next;  
+    }  
+    free(list);  
+}  
+
+int main() {  
+    LinkedList* myList = create_list(sizeof(int));  
+
+    int values[] = {1, 5, 3, 9, 2};  
+    for (int i = 0; i < 5; i++) {  
+        add(myList, &values[i]);  
+    }  
+
+    // 打印链表元素  
+    printf("链表元素:\n");  
+    forEach(myList, print_int);  
+
+    // 求最大值  
+    forEach(myList, find_max);  
+    printf("最大值: %d\n", *(int*)find_max);  
+
+    // 求最小值  
+    forEach(myList, find_min);  
+    printf("最小值: %d\n", *(int*)find_min);  
+
+    // 求和  
+    forEach(myList, sum_values);  
+    printf("总和: %d\n", *(int*)sum_values);  
+
+    // 清理内存  
+    free_list(myList);  
+    return 0;  
+}  
