@@ -1,0 +1,74 @@
+#include <stdio.h>  
+#include <stdlib.h>  
+#include <unistd.h>  
+#include <signal.h>  
+#include <time.h>  
+
+// 定义事件处理函数类型  
+typedef void (*EventHandler)();  
+
+// 闹钟类  
+typedef struct AlarmClock {  
+    int alarm_time;        // 设置的闹钟时间（秒）  
+    int is_alarm_set;      // 是否设置了闹钟  
+    EventHandler on_tick;  // 嘀嗒事件处理函数  
+    EventHandler on_alarm; // 响铃事件处理函数  
+} AlarmClock;  
+
+// 嘀嗒事件的处理函数  
+void tick_event() {  
+    printf("嘀嗒...\n");  
+}  
+
+// 响铃事件的处理函数  
+void alarm_event() {  
+    printf("响铃！时间到了！\n");  
+}  
+
+// 初始化闹钟  
+void initialize_alarm_clock(AlarmClock* alarm_clock) {  
+    alarm_clock->alarm_time = 0;  
+    alarm_clock->is_alarm_set = 0;  
+    alarm_clock->on_tick = tick_event;  
+    alarm_clock->on_alarm = alarm_event;  
+}  
+
+// 设置闹钟  
+void set_alarm(AlarmClock* alarm_clock, int seconds) {  
+    alarm_clock->alarm_time = seconds;  
+    alarm_clock->is_alarm_set = 1;  
+    printf("闹钟已设置为 %d 秒。\n", seconds);  
+}  
+
+// 开始闹钟的工作  
+void start_alarm_clock(AlarmClock* alarm_clock) {  
+    int elapsed = 0;  
+
+    while (1) {  
+        // 调用嘀嗒事件  
+        alarm_clock->on_tick();  
+        sleep(1); // 每秒等待一次  
+        elapsed++;  
+
+        // 检查是否到达设置的时间  
+        if (alarm_clock->is_alarm_set && elapsed >= alarm_clock->alarm_time) {  
+            alarm_clock->on_alarm(); // 调用响铃事件  
+            break; // 闹钟响铃后退出循环  
+        }  
+    }  
+}  
+
+int main() {  
+    AlarmClock my_alarm;  
+
+    // 初始化闹钟  
+    initialize_alarm_clock(&my_alarm);  
+
+    // 设置闹钟  
+    set_alarm(&my_alarm, 5); // 设置为5秒后响铃  
+
+    // 开始闹钟  
+    start_alarm_clock(&my_alarm);  
+
+    return 0;  
+}  
