@@ -1,0 +1,189 @@
+#include <stdio.h>  
+#include <stdlib.h>  
+#include <string.h>  
+
+#define MAX_ORDER_DETAILS 10  
+#define MAX_ORDERS 100  
+typedef struct {  
+    char productName[50];  
+    int quantity;  
+    float unitPrice;  
+} OrderDetail;  
+
+typedef struct {  
+    int orderId;  
+    char customer[50];  
+    OrderDetail details[MAX_ORDER_DETAILS];  
+    int detailCount;  
+} Order;  
+
+typedef struct {  
+    Order orders[MAX_ORDERS];  
+    int orderCount;  
+} OrderService;  
+void addOrder(OrderService* service, Order order);  
+void deleteOrder(OrderService* service, int orderId);  
+void updateOrder(OrderService* service, Order updatedOrder);  
+void queryOrders(OrderService* service, const char* customer);  
+void displayOrders(OrderService* service);  
+float calculateTotalAmount(const Order* order);  
+void addOrder(OrderService* service, Order order) {  
+    if (service->orderCount >= MAX_ORDERS) {  
+        printf("无法添加订单，订单数量达到上限。\n");  
+        return;  
+    }  
+    // 检查订单是否已存在  
+    for (int i = 0; i < service->orderCount; i++) {  
+        if (service->orders[i].orderId == order.orderId) {  
+            printf("订单已存在。\n");  
+            return;  
+        }  
+    }  
+    service->orders[service->orderCount++] = order;  
+    printf("订单 %d 添加成功。\n", order.orderId);  
+}  
+
+void deleteOrder(OrderService* service, int orderId) {  
+    int found = -1;  
+    for (int i = 0; i < service->orderCount; i++) {  
+        if (service->orders[i].orderId == orderId) {  
+            found = i;  
+            break;  
+        }  
+    }  
+    if (found == -1) {  
+        printf("订单不存在。\n");  
+        return;  
+    }  
+    for (int i = found; i < service->orderCount - 1; i++) {  
+        service->orders[i] = service->orders[i + 1];  
+    }  
+    service->orderCount--;  
+    printf("订单 %d 删除成功。\n", orderId);  
+}  
+
+void updateOrder(OrderService* service, Order updatedOrder) {  
+    for (int i = 0; i < service->orderCount; i++) {  
+        if (service->orders[i].orderId == updatedOrder.orderId) {  
+            service->orders[i] = updatedOrder;  
+            printf("订单 %d 更新成功。\n", updatedOrder.orderId);  
+            return;  
+        }  
+    }  
+    printf("订单不存在。\n");  
+}  
+
+void queryOrders(OrderService* service, const char* customer) {  
+    printf("查询到的订单:\n");  
+    for (int i = 0; i < service->orderCount; i++) {  
+        if (strcmp(service->orders[i].customer, customer) == 0) {  
+            printf("订单号: %d, 客户: %s, 总金额: %.2f\n",   
+                service->orders[i].orderId,   
+                service->orders[i].customer,   
+                calculateTotalAmount(&service->orders[i]));  
+        }  
+    }  
+}  
+
+void displayOrders(OrderService* service) {  
+    printf("当前所有订单:\n");  
+    for (int i = 0; i < service->orderCount; i++) {  
+        printf("订单号: %d, 客户: %s, 总金额: %.2f\n",   
+            service->orders[i].orderId,   
+            service->orders[i].customer,   
+            calculateTotalAmount(&service->orders[i]));  
+    }  
+}  
+
+float calculateTotalAmount(const Order* order) {  
+    float total = 0;  
+    for (int i = 0; i < order->detailCount; i++) {  
+        total += order->details[i].quantity * order->details[i].unitPrice;  
+    }  
+    return total;  
+}  
+int main() {  
+    OrderService orderService = { .orderCount = 0 };  
+    Order order;  
+    int choice, orderId;  
+
+    while (1) {  
+        // 打印菜单  
+        printf("\n订单管理系统:\n");  
+        printf("1. 添加订单\n");  
+        printf("2. 删除订单\n");  
+        printf("3. 更新订单\n");  
+        printf("4. 查询订单\n");  
+        printf("5. 显示所有订单\n");  
+        printf("0. 退出\n");  
+        printf("选择操作: ");  
+        scanf("%d", &choice);  
+
+        switch (choice) {  
+            case 1:  
+                // 添加订单  
+                orderId++;  
+                printf("请输入客户姓名: ");  
+                scanf("%s", order.customer);  
+                order.orderId = orderId;  
+                order.detailCount = 0;  
+
+                printf("请输入订单明细的数量: ");  
+                scanf("%d", &order.detailCount);  
+                for (int i = 0; i < order.detailCount; i++) {  
+                    printf("输入商品名称: ");  
+                    scanf("%s", order.details[i].productName);  
+                    printf("输入数量: ");  
+                    scanf("%d", &order.details[i].quantity);  
+                    printf("输入单价: ");  
+                    scanf("%f", &order.details[i].unitPrice);  
+                }  
+
+                addOrder(&orderService, order);  
+                break;  
+            case 2:  
+                // 删除订单  
+                printf("请输入要删除的订单号: ");  
+                scanf("%d", &orderId);  
+                deleteOrder(&orderService, orderId);  
+                break;  
+            case 3:  
+                // 更新订单  
+                order.orderId = orderId;  
+                printf("请输入修改的客户姓名: ");  
+                scanf("%s", order.customer);  
+                printf("请输入订单明细的数量: ");  
+                scanf("%d", &order.detailCount);  
+                for (int i = 0; i < order.detailCount; i++) {  
+                    printf("输入商品名称: ");  
+                    scanf("%s", order.details[i].productName);  
+                    printf("输入数量: ");  
+                    scanf("%d", &order.details[i].quantity);  
+                    printf("输入单价: ");  
+                    scanf("%f", &order.details[i].unitPrice);  
+                }  
+
+                updateOrder(&orderService, order);  
+                break;  
+            case 4:  
+                // 查询订单  
+                printf("请输入客户姓名: ");  
+                char customer[50];  
+                scanf("%s", customer);  
+                queryOrders(&orderService, customer);  
+                break;  
+            case 5:  
+                // 显示所有订单  
+                displayOrders(&orderService);  
+                break;  
+            case 0:  
+                // 退出  
+                printf("退出系统\n");  
+                exit(0);  
+            default:  
+                printf("无效选项，请重试。\n");  
+        }  
+    }  
+
+    return 0;  
+}  
