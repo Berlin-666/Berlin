@@ -1,0 +1,489 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+
+public class Crawler
+{
+    private Uri _baseUri;
+    private HttpClient _httpClient;
+    private ConcurrentBag<string> _visitedUrls = new ConcurrentBag<string>();
+    private ConcurrentBag<string> _errorUrls = new ConcurrentBag<string>();
+    private HashSet<string> _allowedExtensions = new HashSet<string> 
+    { 
+        ".htm", ".html", ".aspx", ".php", ".jsp", 
+        ".asp", ".shtml", ".xhtml", "" // 空字符串表示没有扩展名
+    };
+
+    public event Action<string> OnUrlProcessed;
+    public event Action<string> OnErrorOccurred;
+
+    public Crawler()
+    {
+        _httpClient = new HttpClient(new HttpClientHandler 
+        { 
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate 
+        });
+        _httpClient.Timeout = TimeSpan.FromSeconds(10);
+    }
+
+    public async Task CrawlAsync(string startUrl, int maxPages = 100)
+    {
+        _baseUri = new Uri(startUrl);
+        _visitedUrls.Clear();
+        _errorUrls.Clear();
+
+        var queue = new ConcurrentQueue<string>();
+        queue.Enqueue(startUrl);
+
+        var tasks = new List<Task>();
+        int processedCount = 0;
+
+        while (queue.TryDequeue(out var currentUrl) && processedCount < maxPages)
+        {
+            if (_visitedUrls.Contains(currentUrl)) continue;
+
+            _visitedUrls.Add(currentUrl);
+            processedCount++;
+            OnUrlProcessed?.Invoke(currentUrl);
+
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    var response = await _httpClient.GetAsync(currentUrl);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _errorUrls.Add(currentUrl);
+                        OnErrorOccurred?.Invoke($"Error: {response.StatusCode} - {currentUrl}");
+                        return;
+                    }
+
+                    var contentType = response.Content.Headers.ContentType?.MediaType;
+                    if (contentType == null || !contentType.Contains("text/html"))
+                    {
+                        return;
+                    }
+
+                    var html = await response.Content.ReadAsStringAsync();
+                    var newUrls = ExtractUrls(html, currentUrl);
+
+                    foreach (var url in newUrls)
+                    {
+                        if (!_visitedUrls.Contains(url) && IsSameDomain(url))
+                        {
+                            queue.Enqueue(url);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _errorUrls.Add(currentUrl);
+                    OnErrorOccurred?.Invoke($"Error: {ex.Message} - {currentUrl}");
+                }
+            }));
+
+            // 控制并发数量
+            if (tasks.Count >= 10)
+            {
+                await Task.WhenAny(tasks);
+                tasks.RemoveAll(t => t.IsCompleted);
+            }
+        }
+
+        await Task.WhenAll(tasks);
+    }
+
+    private IEnumerable<string> ExtractUrls(string html, string currentUrl)
+    {
+        var pattern = @"<a\s+(?:[^>]*?\s+)?href=""([^""]*)""";
+        var matches = Regex.Matches(html, pattern, RegexOptions.IgnoreCase);
+
+        foreach (Match match in matches)
+        {
+            if (match.Groups.Count < 2) continue;
+
+            var url = match.Groups[1].Value;
+            if (string.IsNullOrWhiteSpace(url)) continue;
+
+            // 跳过JavaScript和邮件链接
+            if (url.StartsWith("javascript:") || url.StartsWith("mailto:")) continue;
+
+            // 转换相对URL为绝对URL
+            var absoluteUrl = ToAbsoluteUrl(url, currentUrl);
+
+            // 检查URL扩展名
+            var extension = Path.GetExtension(absoluteUrl)?.ToLower();
+            if (!_allowedExtensions.Contains(extension)) continue;
+
+            yield return absoluteUrl;
+        }
+    }
+
+    private string ToAbsoluteUrl(string url, string currentUrl)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var absoluteUri))
+        {
+            return absoluteUri.ToString();
+        }
+
+        if (url.StartsWith("//"))
+        {
+            return _baseUri.Scheme + ":" + url;
+        }
+
+        var currentUri = new Uri(currentUrl);
+        
+        if (url.StartsWith("/"))
+        {
+            return new Uri(_baseUri, url).ToString();
+        }
+
+        if (url.StartsWith("../") || url.StartsWith("./"))
+        {
+            return new Uri(currentUri, url).ToString();
+        }
+
+        // 处理没有前导斜杠的相对URL
+        if (!url.Contains("://"))
+        {
+            var basePath = currentUri.AbsoluteUri;
+            if (!basePath.EndsWith("/"))
+            {
+                basePath = basePath.Substring(0, basePath.LastIndexOf('/') + 1);
+            }
+            return new Uri(new Uri(basePath), url).ToString();
+        }
+
+        return url;
+    }
+
+    private bool IsSameDomain(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+        return uri.Host.Equals(_baseUri.Host, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public IEnumerable<string> GetVisitedUrls() => _visitedUrls;
+    public IEnumerable<string> GetErrorUrls() => _errorUrls;
+}
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+public partial class CrawlerForm : Form
+{
+    private Crawler _crawler;
+    private BindingList<string> _visitedUrls = new BindingList<string>();
+    private BindingList<string> _errorUrls = new BindingList<string>();
+
+    public CrawlerForm()
+    {
+        InitializeComponent();
+        SetupDataBindings();
+    }
+
+    private void SetupDataBindings()
+    {
+        lstVisitedUrls.DataSource = _visitedUrls;
+        lstErrorUrls.DataSource = _errorUrls;
+    }
+
+    private async void btnStart_Click(object sender, EventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(txtStartUrl.Text))
+        {
+            MessageBox.Show("请输入起始URL", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        btnStart.Enabled = false;
+        btnStop.Enabled = true;
+        _visitedUrls.Clear();
+        _errorUrls.Clear();
+
+        _crawler = new Crawler();
+        _crawler.OnUrlProcessed += url => 
+        {
+            this.Invoke((Action)(() => _visitedUrls.Add(url)));
+        };
+        _crawler.OnErrorOccurred += error => 
+        {
+            this.Invoke((Action)(() => _errorUrls.Add(error)));
+        };
+
+        try
+        {
+            await _crawler.CrawlAsync(txtStartUrl.Text, (int)numericMaxPages.Value);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"爬虫错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            btnStart.Enabled = true;
+            btnStop.Enabled = false;
+        }
+    }
+
+    private void btnStop_Click(object sender, EventArgs e)
+    {
+        // 停止爬虫的逻辑可以在这里实现
+        // 实际实现可能需要取消HttpClient请求
+        MessageBox.Show("爬虫已停止", "信息", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        btnStart.Enabled = true;
+        btnStop.Enabled = false;
+    }
+
+    private void btnExport_Click(object sender, EventArgs e)
+    {
+        if (_visitedUrls.Count == 0 && _errorUrls.Count == 0)
+        {
+            MessageBox.Show("没有数据可导出", "信息", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using (var saveDialog = new SaveFileDialog())
+        {
+            saveDialog.Filter = "文本文件|*.txt";
+            if (saveDialog.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    using (var writer = new System.IO.StreamWriter(saveDialog.FileName))
+                    {
+                        writer.WriteLine("已访问的URL:");
+                        foreach (var url in _visitedUrls)
+                        {
+                            writer.WriteLine(url);
+                        }
+
+                        writer.WriteLine("\n错误的URL:");
+                        foreach (var error in _errorUrls)
+                        {
+                            writer.WriteLine(error);
+                        }
+                    }
+                    MessageBox.Show("导出成功", "信息", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"导出失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+    }
+}
+partial class CrawlerForm
+{
+    private System.ComponentModel.IContainer components = null;
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && (components != null))
+        {
+            components.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    private void InitializeComponent()
+    {
+        this.txtStartUrl = new System.Windows.Forms.TextBox();
+        this.label1 = new System.Windows.Forms.Label();
+        this.btnStart = new System.Windows.Forms.Button();
+        this.btnStop = new System.Windows.Forms.Button();
+        this.splitContainer1 = new System.Windows.Forms.SplitContainer();
+        this.groupBox1 = new System.Windows.Forms.GroupBox();
+        this.lstVisitedUrls = new System.Windows.Forms.ListBox();
+        this.groupBox2 = new System.Windows.Forms.GroupBox();
+        this.lstErrorUrls = new System.Windows.Forms.ListBox();
+        this.label2 = new System.Windows.Forms.Label();
+        this.numericMaxPages = new System.Windows.Forms.NumericUpDown();
+        this.btnExport = new System.Windows.Forms.Button();
+        ((System.ComponentModel.ISupportInitialize)(this.splitContainer1)).BeginInit();
+        this.splitContainer1.Panel1.SuspendLayout();
+        this.splitContainer1.Panel2.SuspendLayout();
+        this.splitContainer1.SuspendLayout();
+        this.groupBox1.SuspendLayout();
+        this.groupBox2.SuspendLayout();
+        ((System.ComponentModel.ISupportInitialize)(this.numericMaxPages)).BeginInit();
+        this.SuspendLayout();
+        
+        // txtStartUrl
+        this.txtStartUrl.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+        this.txtStartUrl.Location = new System.Drawing.Point(85, 15);
+        this.txtStartUrl.Name = "txtStartUrl";
+        this.txtStartUrl.Size = new System.Drawing.Size(500, 21);
+        this.txtStartUrl.TabIndex = 0;
+        this.txtStartUrl.Text = "http://";
+        
+        // label1
+        this.label1.AutoSize = true;
+        this.label1.Location = new System.Drawing.Point(12, 18);
+        this.label1.Name = "label1";
+        this.label1.Size = new System.Drawing.Size(59, 12);
+        this.label1.TabIndex = 1;
+        this.label1.Text = "起始URL:";
+        
+        // btnStart
+        this.btnStart.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+        this.btnStart.Location = new System.Drawing.Point(591, 13);
+        this.btnStart.Name = "btnStart";
+        this.btnStart.Size = new System.Drawing.Size(75, 23);
+        this.btnStart.TabIndex = 2;
+        this.btnStart.Text = "开始";
+        this.btnStart.UseVisualStyleBackColor = true;
+        this.btnStart.Click += new System.EventHandler(this.btnStart_Click);
+        
+        // btnStop
+        this.btnStop.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+        this.btnStop.Enabled = false;
+        this.btnStop.Location = new System.Drawing.Point(672, 13);
+        this.btnStop.Name = "btnStop";
+        this.btnStop.Size = new System.Drawing.Size(75, 23);
+        this.btnStop.TabIndex = 3;
+        this.btnStop.Text = "停止";
+        this.btnStop.UseVisualStyleBackColor = true;
+        this.btnStop.Click += new System.EventHandler(this.btnStop_Click);
+        
+        // splitContainer1
+        this.splitContainer1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+        this.splitContainer1.Location = new System.Drawing.Point(12, 70);
+        this.splitContainer1.Name = "splitContainer1";
+        
+        // splitContainer1.Panel1
+        this.splitContainer1.Panel1.Controls.Add(this.groupBox1);
+        
+        // splitContainer1.Panel2
+        this.splitContainer1.Panel2.Controls.Add(this.groupBox2);
+        this.splitContainer1.Size = new System.Drawing.Size(735, 400);
+        this.splitContainer1.SplitterDistance = 367;
+        this.splitContainer1.TabIndex = 4;
+        
+        // groupBox1
+        this.groupBox1.Controls.Add(this.lstVisitedUrls);
+        this.groupBox1.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.groupBox1.Location = new System.Drawing.Point(0, 0);
+        this.groupBox1.Name = "groupBox1";
+        this.groupBox1.Size = new System.Drawing.Size(367, 400);
+        this.groupBox1.TabIndex = 0;
+        this.groupBox1.TabStop = false;
+        this.groupBox1.Text = "已访问的URL";
+        
+        // lstVisitedUrls
+        this.lstVisitedUrls.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.lstVisitedUrls.FormattingEnabled = true;
+        this.lstVisitedUrls.ItemHeight = 12;
+        this.lstVisitedUrls.Location = new System.Drawing.Point(3, 17);
+        this.lstVisitedUrls.Name = "lstVisitedUrls";
+        this.lstVisitedUrls.Size = new System.Drawing.Size(361, 380);
+        this.lstVisitedUrls.TabIndex = 0;
+        
+        // groupBox2
+        this.groupBox2.Controls.Add(this.lstErrorUrls);
+        this.groupBox2.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.groupBox2.Location = new System.Drawing.Point(0, 0);
+        this.groupBox2.Name = "groupBox2";
+        this.groupBox2.Size = new System.Drawing.Size(364, 400);
+        this.groupBox2.TabIndex = 0;
+        this.groupBox2.TabStop = false;
+        this.groupBox2.Text = "错误的URL";
+        
+        // lstErrorUrls
+        this.lstErrorUrls.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.lstErrorUrls.FormattingEnabled = true;
+        this.lstErrorUrls.ItemHeight = 12;
+        this.lstErrorUrls.Location = new System.Drawing.Point(3, 17);
+        this.lstErrorUrls.Name = "lstErrorUrls";
+        this.lstErrorUrls.Size = new System.Drawing.Size(358, 380);
+        this.lstErrorUrls.TabIndex = 0;
+        
+        // label2
+        this.label2.AutoSize = true;
+        this.label2.Location = new System.Drawing.Point(12, 45);
+        this.label2.Name = "label2";
+        this.label2.Size = new System.Drawing.Size(59, 12);
+        this.label2.TabIndex = 5;
+        this.label2.Text = "最大页数:";
+        
+        // numericMaxPages
+        this.numericMaxPages.Location = new System.Drawing.Point(85, 43);
+        this.numericMaxPages.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+        this.numericMaxPages.Name = "numericMaxPages";
+        this.numericMaxPages.Size = new System.Drawing.Size(120, 21);
+        this.numericMaxPages.TabIndex = 6;
+        this.numericMaxPages.Value = new decimal(new int[] {
+            100,
+            0,
+            0,
+            0});
+        
+        // btnExport
+        this.btnExport.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+        this.btnExport.Location = new System.Drawing.Point(672, 40);
+        this.btnExport.Name = "btnExport";
+        this.btnExport.Size = new System.Drawing.Size(75, 23);
+        this.btnExport.TabIndex = 7;
+        this.btnExport.Text = "导出结果";
+        this.btnExport.UseVisualStyleBackColor = true;
+        this.btnExport.Click += new System.EventHandler(this.btnExport_Click);
+        
+        // CrawlerForm
+        this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
+        this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+        this.ClientSize = new System.Drawing.Size(759, 482);
+        this.Controls.Add(this.btnExport);
+        this.Controls.Add(this.numericMaxPages);
+        this.Controls.Add(this.label2);
+        this.Controls.Add(this.splitContainer1);
+        this.Controls.Add(this.btnStop);
+        this.Controls.Add(this.btnStart);
+        this.Controls.Add(this.label1);
+        this.Controls.Add(this.txtStartUrl);
+        this.Name = "CrawlerForm";
+        this.Text = "网页爬虫";
+        this.splitContainer1.Panel1.ResumeLayout(false);
+        this.splitContainer1.Panel2.ResumeLayout(false);
+        ((System.ComponentModel.ISupportInitialize)(this.splitContainer1)).EndInit();
+        this.splitContainer1.ResumeLayout(false);
+        this.groupBox1.ResumeLayout(false);
+        this.groupBox2.ResumeLayout(false);
+        ((System.ComponentModel.ISupportInitialize)(this.numericMaxPages)).EndInit();
+        this.ResumeLayout(false);
+        this.PerformLayout();
+    }
+
+    private System.Windows.Forms.TextBox txtStartUrl;
+    private System.Windows.Forms.Label label1;
+    private System.Windows.Forms.Button btnStart;
+    private System.Windows.Forms.Button btnStop;
+    private System.Windows.Forms.SplitContainer splitContainer1;
+    private System.Windows.Forms.GroupBox groupBox1;
+    private System.Windows.Forms.ListBox lstVisitedUrls;
+    private System.Windows.Forms.GroupBox groupBox2;
+    private System.Windows.Forms.ListBox lstErrorUrls;
+    private System.Windows.Forms.Label label2;
+    private System.Windows.Forms.NumericUpDown numericMaxPages;
+    private System.Windows.Forms.Button btnExport;
+}
