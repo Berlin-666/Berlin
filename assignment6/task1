@@ -1,0 +1,325 @@
+using OrderManagement;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace OrderManagementUI
+{
+    public partial class MainForm : Form
+    {
+        private OrderService orderService = new OrderService();
+        private BindingSource orderBindingSource = new BindingSource();
+        private BindingSource detailBindingSource = new BindingSource();
+
+        public MainForm()
+        {
+            InitializeComponent();
+            InitializeDataBinding();
+            LoadOrders();
+        }
+
+        private void InitializeDataBinding()
+        {
+            // 订单列表数据绑定
+            orderBindingSource.DataSource = typeof(Order);
+            orderDataGridView.DataSource = orderBindingSource;
+            orderDataGridView.AutoGenerateColumns = false;
+
+            // 配置订单列表列
+            orderDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "OrderId",
+                HeaderText = "订单号"
+            });
+            orderDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "Customer",
+                HeaderText = "客户"
+            });
+            orderDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "TotalAmount",
+                HeaderText = "总金额"
+            });
+            orderDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "OrderDate",
+                HeaderText = "日期"
+            });
+
+            // 订单明细数据绑定
+            detailBindingSource.DataSource = orderBindingSource;
+            detailBindingSource.DataMember = "Details";
+            detailDataGridView.DataSource = detailBindingSource;
+            detailDataGridView.AutoGenerateColumns = false;
+
+            // 配置订单明细列
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "ProductName",
+                HeaderText = "产品名称"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "UnitPrice",
+                HeaderText = "单价"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "Quantity",
+                HeaderText = "数量"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "Amount",
+                HeaderText = "金额"
+            });
+        }
+
+        private void LoadOrders()
+        {
+            orderBindingSource.DataSource = orderService.GetAllOrders();
+        }
+
+        private void btnAdd_Click(object sender, EventArgs e)
+        {
+            var editForm = new OrderEditForm(null);
+            if (editForm.ShowDialog() == DialogResult.OK)
+            {
+                orderService.AddOrder(editForm.EditedOrder);
+                LoadOrders();
+            }
+        }
+
+        private void btnEdit_Click(object sender, EventArgs e)
+        {
+            if (orderBindingSource.Current == null) return;
+
+            var currentOrder = (Order)orderBindingSource.Current;
+            var editForm = new OrderEditForm(currentOrder);
+            if (editForm.ShowDialog() == DialogResult.OK)
+            {
+                orderService.UpdateOrder(editForm.EditedOrder);
+                LoadOrders();
+            }
+        }
+
+        private void btnDelete_Click(object sender, EventArgs e)
+        {
+            if (orderBindingSource.Current == null) return;
+
+            var orderId = ((Order)orderBindingSource.Current).OrderId;
+            orderService.RemoveOrder(orderId);
+            LoadOrders();
+        }
+
+        private void btnQuery_Click(object sender, EventArgs e)
+        {
+            var queryForm = new QueryForm();
+            if (queryForm.ShowDialog() == DialogResult.OK)
+            {
+                List<Order> results = null;
+                if (queryForm.QueryByOrderId)
+                {
+                    results = orderService.QueryOrders(o => o.OrderId == queryForm.OrderId).ToList();
+                }
+                else if (queryForm.QueryByCustomer)
+                {
+                    results = orderService.QueryOrders(o => o.Customer.Contains(queryForm.CustomerName)).ToList();
+                }
+                else if (queryForm.QueryByProduct)
+                {
+                    results = orderService.QueryOrdersByProductName(queryForm.ProductName).ToList();
+                }
+                else if (queryForm.QueryByTotalAmount)
+                {
+                    results = orderService.QueryOrders(o => o.TotalAmount >= queryForm.MinAmount && o.TotalAmount <= queryForm.MaxAmount).ToList();
+                }
+
+                orderBindingSource.DataSource = results;
+            }
+        }
+
+        private void btnReset_Click(object sender, EventArgs e)
+        {
+            LoadOrders();
+        }
+    }
+}
+using OrderManagement;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Windows.Forms;
+
+namespace OrderManagementUI
+{
+    public partial class OrderEditForm : Form
+    {
+        public Order EditedOrder { get; private set; }
+        private BindingSource detailBindingSource = new BindingSource();
+
+        public OrderEditForm(Order order)
+        {
+            InitializeComponent();
+            InitializeDataBinding();
+
+            if (order == null)
+            {
+                EditedOrder = new Order { OrderDate = DateTime.Now, Details = new List<OrderDetails>() };
+                Text = "新建订单";
+            }
+            else
+            {
+                EditedOrder = order.Clone() as Order;
+                Text = "编辑订单";
+            }
+
+            detailBindingSource.DataSource = EditedOrder.Details;
+            txtOrderId.DataBindings.Add("Text", EditedOrder, "OrderId");
+            txtCustomer.DataBindings.Add("Text", EditedOrder, "Customer");
+            dtpOrderDate.DataBindings.Add("Value", EditedOrder, "OrderDate");
+        }
+
+        private void InitializeDataBinding()
+        {
+            detailBindingSource.DataSource = typeof(List<OrderDetails>);
+            detailDataGridView.DataSource = detailBindingSource;
+            detailDataGridView.AutoGenerateColumns = false;
+
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "ProductName",
+                HeaderText = "产品名称"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "UnitPrice",
+                HeaderText = "单价"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "Quantity",
+                HeaderText = "数量"
+            });
+        }
+
+        private void btnAddDetail_Click(object sender, EventArgs e)
+        {
+            var detail = new OrderDetails
+            {
+                ProductName = txtProductName.Text,
+                UnitPrice = decimal.Parse(txtUnitPrice.Text),
+                Quantity = int.Parse(txtQuantity.Text)
+            };
+            detailBindingSource.Add(detail);
+        }
+
+        private void btnRemoveDetail_Click(object sender, EventArgs e)
+        {
+            if (detailBindingSource.Current != null)
+            {
+                detailBindingSource.RemoveCurrent();
+            }
+        }
+
+        private void btnOK_Click(object sender, EventArgs e)
+        {
+            if (ValidateInput())
+            {
+                DialogResult = DialogResult.OK;
+                Close();
+            }
+        }
+
+        private bool ValidateInput()
+        {
+            if (string.IsNullOrWhiteSpace(EditedOrder.OrderId))
+            {
+                MessageBox.Show("请输入订单号");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(EditedOrder.Customer))
+            {
+                MessageBox.Show("请输入客户名称");
+                return false;
+            }
+
+            if (EditedOrder.Details.Count == 0)
+            {
+                MessageBox.Show("请添加至少一个订单明细");
+                return false;
+            }
+
+            return true;
+        }
+
+        private void btnCancel_Click(object sender, EventArgs e)
+        {
+            DialogResult = DialogResult.Cancel;
+            Close();
+        }
+    }
+}
+using System;
+using System.Windows.Forms;
+
+namespace OrderManagementUI
+{
+    public partial class QueryForm : Form
+    {
+        public bool QueryByOrderId => rbOrderId.Checked;
+        public bool QueryByCustomer => rbCustomer.Checked;
+        public bool QueryByProduct => rbProduct.Checked;
+        public bool QueryByTotalAmount => rbAmount.Checked;
+
+        public string OrderId => txtOrderId.Text;
+        public string CustomerName => txtCustomer.Text;
+        public string ProductName => txtProduct.Text;
+        public decimal MinAmount => decimal.Parse(txtMinAmount.Text);
+        public decimal MaxAmount => decimal.Parse(txtMaxAmount.Text);
+
+        public QueryForm()
+        {
+            InitializeComponent();
+        }
+
+        private void rbOrderId_CheckedChanged(object sender, EventArgs e)
+        {
+            txtOrderId.Enabled = rbOrderId.Checked;
+        }
+
+        private void rbCustomer_CheckedChanged(object sender, EventArgs e)
+        {
+            txtCustomer.Enabled = rbCustomer.Checked;
+        }
+
+        private void rbProduct_CheckedChanged(object sender, EventArgs e)
+        {
+            txtProduct.Enabled = rbProduct.Checked;
+        }
+
+        private void rbAmount_CheckedChanged(object sender, EventArgs e)
+        {
+            txtMinAmount.Enabled = rbAmount.Checked;
+            txtMaxAmount.Enabled = rbAmount.Checked;
+        }
+
+        private void btnOK_Click(object sender, EventArgs e)
+        {
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+
+        private void btnCancel_Click(object sender, EventArgs e)
+        {
+            DialogResult = DialogResult.Cancel;
+            Close();
+        }
+    }
+}
