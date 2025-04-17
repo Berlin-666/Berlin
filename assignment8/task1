@@ -1,0 +1,567 @@
+using System;
+using System.Collections.Generic;
+
+namespace OrderManagement.Domain
+{
+    public class Order
+    {
+        public string OrderId { get; set; }
+        public string Customer { get; set; }
+        public DateTime OrderDate { get; set; }
+        public decimal TotalAmount { get; set; }
+        public ICollection<OrderDetails> Details { get; set; } = new List<OrderDetails>();
+
+        public void CalculateTotal()
+        {
+            TotalAmount = Details.Sum(d => d.Amount);
+        }
+    }
+}
+namespace OrderManagement.Domain
+{
+    public class OrderDetails
+    {
+        public int Id { get; set; }
+        public string OrderId { get; set; }
+        public Order Order { get; set; }
+        public string ProductName { get; set; }
+        public decimal UnitPrice { get; set; }
+        public int Quantity { get; set; }
+        public decimal Amount => UnitPrice * Quantity;
+    }
+}
+using Microsoft.EntityFrameworkCore;
+using OrderManagement.Domain;
+
+namespace OrderManagement.Infrastructure
+{
+    public class OrderDbContext : DbContext
+    {
+        public DbSet<Order> Orders { get; set; }
+        public DbSet<OrderDetails> OrderDetails { get; set; }
+
+        public OrderDbContext(DbContextOptions<OrderDbContext> options) : base(options)
+        {
+        }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Order>(entity =>
+            {
+                entity.HasKey(e => e.OrderId);
+                entity.Property(e => e.OrderId).HasMaxLength(50);
+                entity.Property(e => e.Customer).HasMaxLength(100).IsRequired();
+                entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+                
+                entity.HasMany(e => e.Details)
+                      .WithOne(d => d.Order)
+                      .HasForeignKey(d => d.OrderId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<OrderDetails>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).ValueGeneratedOnAdd();
+                entity.Property(e => e.ProductName).HasMaxLength(100).IsRequired();
+                entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
+                entity.Property(e => e.Quantity).HasDefaultValue(1);
+            });
+        }
+    }
+}
+using OrderManagement.Domain;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+namespace OrderManagement.Infrastructure
+{
+    public interface IOrderRepository
+    {
+        Task<Order> GetByIdAsync(string orderId);
+        Task<IEnumerable<Order>> GetAllAsync();
+        Task AddAsync(Order order);
+        Task UpdateAsync(Order order);
+        Task DeleteAsync(string orderId);
+        Task<bool> ExistsAsync(string orderId);
+    }
+}
+using Microsoft.EntityFrameworkCore;
+using OrderManagement.Domain;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace OrderManagement.Infrastructure
+{
+    public class OrderRepository : IOrderRepository
+    {
+        private readonly OrderDbContext _context;
+
+        public OrderRepository(OrderDbContext context)
+        {
+            _context = context;
+        }
+
+        public async Task<Order> GetByIdAsync(string orderId)
+        {
+            return await _context.Orders
+                .Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.OrderId == orderId);
+        }
+
+        public async Task<IEnumerable<Order>> GetAllAsync()
+        {
+            return await _context.Orders
+                .Include(o => o.Details)
+                .ToListAsync();
+        }
+
+        public async Task AddAsync(Order order)
+        {
+            await _context.Orders.AddAsync(order);
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task UpdateAsync(Order order)
+        {
+            _context.Orders.Update(order);
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task DeleteAsync(string orderId)
+        {
+            var order = await GetByIdAsync(orderId);
+            if (order != null)
+            {
+                _context.Orders.Remove(order);
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        public async Task<bool> ExistsAsync(string orderId)
+        {
+            return await _context.Orders.AnyAsync(o => o.OrderId == orderId);
+        }
+    }
+}
+using OrderManagement.Domain;
+using OrderManagement.Infrastructure;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+namespace OrderManagement.Application
+{
+    public class OrderService
+    {
+        private readonly IOrderRepository _orderRepository;
+
+        public OrderService(IOrderRepository orderRepository)
+        {
+            _orderRepository = orderRepository;
+        }
+
+        public async Task<Order> GetOrderAsync(string orderId)
+        {
+            return await _orderRepository.GetByIdAsync(orderId);
+        }
+
+        public async Task<IEnumerable<Order>> GetAllOrdersAsync()
+        {
+            return await _orderRepository.GetAllAsync();
+        }
+
+        public async Task AddOrderAsync(Order order)
+        {
+            if (await _orderRepository.ExistsAsync(order.OrderId))
+            {
+                throw new System.Exception("订单已存在");
+            }
+            order.CalculateTotal();
+            await _orderRepository.AddAsync(order);
+        }
+
+        public async Task UpdateOrderAsync(Order order)
+        {
+            order.CalculateTotal();
+            await _orderRepository.UpdateAsync(order);
+        }
+
+        public async Task DeleteOrderAsync(string orderId)
+        {
+            await _orderRepository.DeleteAsync(orderId);
+        }
+
+        public async Task<IEnumerable<Order>> QueryOrdersAsync(string customerName)
+        {
+            var allOrders = await _orderRepository.GetAllAsync();
+            return allOrders.Where(o => o.Customer.Contains(customerName));
+        }
+    }
+}
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using OrderManagement.Application;
+using OrderManagement.Infrastructure;
+using OrderManagement.UI;
+using System;
+using System.Windows.Forms;
+
+namespace OrderManagement
+{
+    static class Program
+    {
+        [STAThread]
+        static void Main()
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
+            var services = new ServiceCollection();
+            ConfigureServices(services);
+
+            using var serviceProvider = services.BuildServiceProvider();
+            var mainForm = serviceProvider.GetRequiredService<MainForm>();
+            Application.Run(mainForm);
+        }
+
+        private static void ConfigureServices(IServiceCollection services)
+        {
+            var connectionString = "server=localhost;port=3306;database=orderdb;user=root;password=yourpassword;";
+
+            services.AddDbContext<OrderDbContext>(options =>
+                options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
+
+            services.AddScoped<IOrderRepository, OrderRepository>();
+            services.AddScoped<OrderService>();
+            services.AddScoped<MainForm>();
+        }
+    }
+}
+using OrderManagement.Application;
+using OrderManagement.Domain;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace OrderManagement.UI
+{
+    public partial class MainForm : Form
+    {
+        private readonly OrderService _orderService;
+        private BindingSource _orderBindingSource = new BindingSource();
+        private BindingSource _detailBindingSource = new BindingSource();
+
+        public MainForm(OrderService orderService)
+        {
+            _orderService = orderService;
+            InitializeComponent();
+            InitializeDataBinding();
+            LoadOrdersAsync();
+        }
+
+        private void InitializeDataBinding()
+        {
+            // 订单列表数据绑定
+            _orderBindingSource.DataSource = typeof(Order);
+            orderDataGridView.DataSource = _orderBindingSource;
+            orderDataGridView.AutoGenerateColumns = false;
+
+            // 配置订单列表列
+            orderDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "OrderId",
+                HeaderText = "订单号"
+            });
+            orderDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "Customer",
+                HeaderText = "客户"
+            });
+            orderDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "TotalAmount",
+                HeaderText = "总金额"
+            });
+            orderDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "OrderDate",
+                HeaderText = "日期"
+            });
+
+            // 订单明细数据绑定
+            _detailBindingSource.DataSource = _orderBindingSource;
+            _detailBindingSource.DataMember = "Details";
+            detailDataGridView.DataSource = _detailBindingSource;
+            detailDataGridView.AutoGenerateColumns = false;
+
+            // 配置订单明细列
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "ProductName",
+                HeaderText = "产品名称"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "UnitPrice",
+                HeaderText = "单价"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "Quantity",
+                HeaderText = "数量"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "Amount",
+                HeaderText = "金额"
+            });
+        }
+
+        private async void LoadOrdersAsync()
+        {
+            try
+            {
+                var orders = await _orderService.GetAllOrdersAsync();
+                _orderBindingSource.DataSource = orders.ToList();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"加载订单失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private async void btnAdd_Click(object sender, EventArgs e)
+        {
+            var editForm = new OrderEditForm(null);
+            if (editForm.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    await _orderService.AddOrderAsync(editForm.EditedOrder);
+                    LoadOrdersAsync();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"添加订单失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private async void btnEdit_Click(object sender, EventArgs e)
+        {
+            if (_orderBindingSource.Current == null) return;
+
+            var currentOrder = (Order)_orderBindingSource.Current;
+            var editForm = new OrderEditForm(currentOrder);
+            if (editForm.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    await _orderService.UpdateOrderAsync(editForm.EditedOrder);
+                    LoadOrdersAsync();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"更新订单失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private async void btnDelete_Click(object sender, EventArgs e)
+        {
+            if (_orderBindingSource.Current == null) return;
+
+            var orderId = ((Order)_orderBindingSource.Current).OrderId;
+            if (MessageBox.Show($"确定要删除订单 {orderId} 吗?", "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                try
+                {
+                    await _orderService.DeleteOrderAsync(orderId);
+                    LoadOrdersAsync();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"删除订单失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private async void btnQuery_Click(object sender, EventArgs e)
+        {
+            var query = txtQuery.Text.Trim();
+            if (string.IsNullOrEmpty(query))
+            {
+                LoadOrdersAsync();
+                return;
+            }
+
+            try
+            {
+                var results = await _orderService.QueryOrdersAsync(query);
+                _orderBindingSource.DataSource = results.ToList();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"查询失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+}
+using OrderManagement.Domain;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Windows.Forms;
+
+namespace OrderManagement.UI
+{
+    public partial class OrderEditForm : Form
+    {
+        public Order EditedOrder { get; private set; }
+        private BindingSource _detailBindingSource = new BindingSource();
+
+        public OrderEditForm(Order order)
+        {
+            InitializeComponent();
+            InitializeDataBinding();
+
+            if (order == null)
+            {
+                EditedOrder = new Order 
+                { 
+                    OrderId = GenerateOrderId(),
+                    OrderDate = DateTime.Now, 
+                    Details = new List<OrderDetails>() 
+                };
+                Text = "新建订单";
+            }
+            else
+            {
+                EditedOrder = new Order
+                {
+                    OrderId = order.OrderId,
+                    Customer = order.Customer,
+                    OrderDate = order.OrderDate,
+                    Details = new List<OrderDetails>(order.Details.Select(d => new OrderDetails
+                    {
+                        ProductName = d.ProductName,
+                        UnitPrice = d.UnitPrice,
+                        Quantity = d.Quantity
+                    }))
+                };
+                Text = "编辑订单";
+            }
+
+            _detailBindingSource.DataSource = EditedOrder.Details;
+            txtOrderId.DataBindings.Add("Text", EditedOrder, "OrderId");
+            txtCustomer.DataBindings.Add("Text", EditedOrder, "Customer");
+            dtpOrderDate.DataBindings.Add("Value", EditedOrder, "OrderDate");
+        }
+
+        private string GenerateOrderId()
+        {
+            return "ORD" + DateTime.Now.ToString("yyyyMMddHHmmss");
+        }
+
+        private void InitializeDataBinding()
+        {
+            _detailBindingSource.DataSource = typeof(List<OrderDetails>);
+            detailDataGridView.DataSource = _detailBindingSource;
+            detailDataGridView.AutoGenerateColumns = false;
+
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "ProductName",
+                HeaderText = "产品名称"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "UnitPrice",
+                HeaderText = "单价"
+            });
+            detailDataGridView.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                DataPropertyName = "Quantity",
+                HeaderText = "数量"
+            });
+        }
+
+        private void btnAddDetail_Click(object sender, EventArgs e)
+        {
+            if (!decimal.TryParse(txtUnitPrice.Text, out var unitPrice))
+            {
+                MessageBox.Show("请输入有效的单价", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (!int.TryParse(txtQuantity.Text, out var quantity))
+            {
+                MessageBox.Show("请输入有效的数量", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var detail = new OrderDetails
+            {
+                ProductName = txtProductName.Text,
+                UnitPrice = unitPrice,
+                Quantity = quantity
+            };
+            _detailBindingSource.Add(detail);
+            EditedOrder.CalculateTotal();
+            lblTotal.Text = $"总金额: {EditedOrder.TotalAmount:C}";
+        }
+
+        private void btnRemoveDetail_Click(object sender, EventArgs e)
+        {
+            if (_detailBindingSource.Current != null)
+            {
+                _detailBindingSource.RemoveCurrent();
+                EditedOrder.CalculateTotal();
+                lblTotal.Text = $"总金额: {EditedOrder.TotalAmount:C}";
+            }
+        }
+
+        private void btnOK_Click(object sender, EventArgs e)
+        {
+            if (ValidateInput())
+            {
+                DialogResult = DialogResult.OK;
+                Close();
+            }
+        }
+
+        private bool ValidateInput()
+        {
+            if (string.IsNullOrWhiteSpace(EditedOrder.OrderId))
+            {
+                MessageBox.Show("请输入订单号", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(EditedOrder.Customer))
+            {
+                MessageBox.Show("请输入客户名称", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+
+            if (EditedOrder.Details.Count == 0)
+            {
+                MessageBox.Show("请添加至少一个订单明细", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+
+            return true;
+        }
+
+        private void btnCancel_Click(object sender, EventArgs e)
+        {
+            DialogResult = DialogResult.Cancel;
+            Close();
+        }
+    }
+}
